@@ -1,0 +1,13 @@
+*
+!.gitignore
+!README.md
+!shareable-skill/
+shareable-skill/*
+!shareable-skill/nlm-course-slides/
+!shareable-skill/nlm-course-slides/**
+
+shareable-skill/*.zip
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
