@@ -20,6 +20,7 @@ from common import (
     ensure_authenticated,
     find_section,
     load_course_manifest,
+    log_message,
     read_json,
     safe_print_json,
     sanitize_filename,
@@ -30,10 +31,9 @@ from common import (
 DEFAULT_CREATE_PROFILE_POOL = [
     {"profile": "default", "email": "wuzhijian1999@gmail.com"},
     {"profile": "worker_wly", "email": "wlydsydmhmdsyd@gmail.com"},
-    {"profile": "worker_what", "email": "whatmatthew697@gmail.com"},
     {"profile": "worker_daba", "email": "dababyturnsintoaconvertible@gmail.com"},
 ]
-DEFAULT_SINGLE_PROFILE = {"profile": "default", "email": "wuzhijian1999@gmail.com"}
+DEFAULT_SINGLE_PROFILE = {"profile": "default", "email": ""}
 DEFAULT_CREATE_DAILY_LIMIT = 15
 CREATE_USAGE_TRACKER_PATH = Path.home() / ".notebooklm-mcp-cli" / "slide-create-usage.json"
 CREATE_QUOTA_ERROR_MARKERS = [
@@ -42,9 +42,6 @@ CREATE_QUOTA_ERROR_MARKERS = [
     "usage limit",
     "limit reached",
     "exceeded your",
-    "too many requests",
-    "rate limit",
-    "rate limited",
     "come back tomorrow",
 ]
 
@@ -148,7 +145,20 @@ def _estimate_remaining(used: int, limit: int) -> int:
 
 def _is_create_quota_error(text: str) -> bool:
     lowered = text.lower()
+    if "rate limit" in lowered or "rate limited" in lowered or "resource_exhausted" in lowered:
+        return False
     return any(marker in lowered for marker in CREATE_QUOTA_ERROR_MARKERS)
+
+
+def _is_temporary_create_rate_limit(text: str) -> bool:
+    lowered = text.lower()
+    return (
+        "rate limit" in lowered
+        or "rate limited" in lowered
+        or "resource_exhausted" in lowered
+        or "api error (code 8)" in lowered
+        or "userdisplayableerror" in lowered
+    )
 
 
 def _build_profile_pool(args: argparse.Namespace) -> list[dict[str, str]]:
@@ -334,16 +344,18 @@ def _create_with_profile_pool(
             )
         except Exception as exc:
             error_text = str(exc)
+            is_quota = _is_create_quota_error(error_text)
+            is_temporary_rate_limit = _is_temporary_create_rate_limit(error_text)
             attempted_profiles.append(
                 {
                     "profile": profile_name,
                     "email": profile_email,
-                    "status": "failed_quota" if _is_create_quota_error(error_text) else "failed",
+                    "status": "failed_quota" if is_quota else ("failed_rate_limit" if is_temporary_rate_limit else "failed"),
                     "error": error_text,
                 }
             )
             last_error = exc
-            if len(profile_pool) > 1 and _is_create_quota_error(error_text):
+            if len(profile_pool) > 1 and is_quota:
                 _record_profile_exhausted(
                     usage_tracker,
                     day_key=day_key,
@@ -351,6 +363,8 @@ def _create_with_profile_pool(
                     daily_limit=args.daily_create_limit,
                     error=error_text,
                 )
+                continue
+            if len(profile_pool) > 1 and is_temporary_rate_limit:
                 continue
             raise RuntimeError(
                 f"{error_text}\nAttempted profiles: {json.dumps(attempted_profiles, ensure_ascii=False)}"
@@ -437,11 +451,14 @@ def main() -> int:
             continue
 
         try:
+            log_message(
+                f"[create] section {section.id} {section.title}: request slide create"
+            )
             artifact_id, profile_result, attempted_profiles = _create_with_profile_pool(
                 args=args,
                 notebook_id=notebook_id,
                 source_id=source_id,
-                focus=section.focus or build_focus_prompt(section.title),
+                focus=section.focus or build_focus_prompt(section.title, manifest.course_title),
                 usage_tracker=usage_tracker,
                 authenticated_profiles=authenticated_profiles,
                 day_key=day_key,
@@ -463,6 +480,9 @@ def main() -> int:
                     "error": None,
                 }
             )
+            log_message(
+                f"[create] created {section.id} -> artifact {artifact_id} via {profile_result['profile']}"
+            )
         except Exception as exc:
             failures += 1
             results.append(
@@ -480,6 +500,7 @@ def main() -> int:
                     "error": str(exc),
                 }
             )
+            log_message(f"[create] failed {section.id}: {exc}")
         if created_count + failures < eligible_create_count:
             time.sleep(args.api_delay_seconds)
 

@@ -97,6 +97,8 @@ python3 scripts/list_course_sections.py \
 - `section_id`
 - `section_title`
 - `resource_title`
+- extracted content preview for at least 1 non-intro section. Prefer sampling `1.2` when it exists.
+- if the preview looks like placeholder interaction copy such as “下面是围绕所学知识点的训战互动……”, stop and repair the content-extraction rule before Stage C.
 - the full NotebookLM prompt text currently planned for Stage D slide creation
 - whether the prompt is recommended to stay as-is or be revised before continuing
 - if revision is recommended, provide concrete suggested edits, including which audience wording, source-document framing, terminology constraints, or generation requirements should change and why
@@ -337,6 +339,7 @@ python3 scripts/summarize_course_slide_status.py \
 ## References
 
 - [references/manifest-format.md](references/manifest-format.md)
+- For `华为流程框架基础-人力资源管理流程` and similar Huawei HR flow-framework courses in this local environment, read [references/huawei-hr-prompt-template.md](references/huawei-hr-prompt-template.md) before proposing prompt changes or confirming the final NotebookLM prompt.
 
 ## Local Defaults
 
@@ -346,10 +349,43 @@ python3 scripts/summarize_course_slide_status.py \
 - In this local environment, when Stage F downloads PPTX files to the local course directory, Codex should immediately post-process each downloaded deck before presenting it to the user.
 - In this local environment, when Stage F downloads a section deck, Codex must also write a Markdown transcript beside the final PPTX, using the same final filename stem and the `.md` extension.
 - In a shared/new-machine setup, Codex must confirm before Stage D whether the user wants a profile pool. If the user only has 1 Google account, do not enable the pool. If the user has multiple accounts, collect their `nlm` profile names first and pass them via repeated `--profile-pool-item`.
-- In this shareable version, the safe default is a single `default` profile. Only enable a multi-profile pool after the user explicitly provides their own `nlm` profile names.
-- When the user confirms that a profile pool is available, pass it explicitly with repeated `--profile-pool-item <profile>` or `--profile-pool-item <profile>:<email>`.
+- In this local environment, when the user confirms that a profile pool is available, Stage D slide creation should use the local profile pool by default when `--profile` is not explicitly forced:
+  - `worker_wly` -> `wlydsydmhmdsyd@gmail.com`
+  - `worker_daba` -> `dababyturnsintoaconvertible@gmail.com`
+- In this local environment, Stage C notebook creation and source upload must default to the owner account `default` -> `wuzhijian1999@gmail.com`, so the notebook owner is always the main account unless the user explicitly overrides it.
+- Before Stage C or Stage D in this local environment, Codex must show the planned NotebookLM prompt wording for confirmation. At minimum, confirm the target audience, source-document framing, and any course-family-specific wording before creating new slides.
+- In this local environment, Codex must not blindly reuse the previous course family's prompt wording. It must adapt the prompt to the current course family based on the fetched course title and the extracted teaching content before any new create requests.
+- When showing the planned NotebookLM prompt for confirmation in this local environment, Codex must include both:
+  - the full prompt text that will be used for the next create requests
+  - a short summary of what changed from the default template and why those changes fit the current course
+- For `华为流程框架基础-人力资源管理流程` and similar Huawei HR flow-framework courses in this local environment, Codex must separate prompt guidance into `固定项` and `可改项` when confirming or suggesting edits. Do not mix them together in a way that implies every sentence is equally negotiable.
+- For that Huawei HR course family, treat the visual-effect block, white-base block, and brand-color block as fixed unless the user explicitly asks to change them. Do not propose wording changes to those blocks as part of ordinary prompt refinement.
+- For that Huawei HR course family, cover-page prompting should default to the minimal negative-constraint style documented in [references/huawei-hr-prompt-template.md](references/huawei-hr-prompt-template.md): remove subtitle, audience/object text, and extra descriptive text, but do not add extra layout micromanagement such as forcing oversized titles, black-bold-large combinations, line-break rules, or other design-process instructions unless the user explicitly asks for them.
+- For that Huawei HR course family, when recommending prompt edits, prefer preserving the user's previous satisfactory default style and only patch the specific recurring errors. Do not escalate from a small cover issue into a broad redesign of the prompt.
+- If the user corrects the NotebookLM prompt wording in the thread, treat that correction as the source of truth for the current run and update the prompt before any new create requests.
+- In this local environment, the default language wording must keep the slides primarily in Chinese, but allow English acronyms or English terms that already appear in the source lecture script, such as `AI`, `LTC`, `IPD`, `CRM`, and `ERP`. Do not introduce extra English words, English sentences, or pure-English titles that are not already present in the source material.
+- For enterprise process-intelligence courses in this local environment, do not default the audience to `中国出海企业员工`. The default audience is:
+  - `流程与智能化中的企业领导者`
+  - `企业各个部门业务负责人`
+  - `企业流程与IT部门员工`
+  - `人工智能变革项目管理者`
+- For enterprise process-intelligence courses in this local environment, do not describe the source document as “给中国出海企业员工的课程内容”. The default source framing is:
+  - `这是企业流程智能化培训解决方案。`
+  - `本解决方案旨在企业流程框架（参见企业流程框架基础解决方案）的基础上，讲解人工智能对企业流程的设计、实施、运营所产生的深刻影响。`
+  - `课程为流程与智能化中的管理者和参与数智变革的人员提供数智化基础理论、实操建议和案例研究。`
+- For `管理变革流程智能化` courses in this local environment, adapt the prompt wording away from generic enterprise-process wording:
+  - audience should target `企业变革项目发起人`、`企业管理者`、`各部门业务负责人`、`流程与IT部门员工`、`参与数智化转型与AI变革的项目管理者`
+  - source framing should explicitly describe `管理变革流程智能化培训解决方案`, emphasizing `识别、立项、诊断、规划、试点验证、推广落地与运营转化`
+  - generation requirements should emphasize `管理变革流程中的关键机制、方法、判断依据、治理动作与落地路径`
+  - remove stale wording copied from other course families, especially any HR-specific terminology constraints that do not belong to the current course
+- In this local environment, when Stage C creates a new notebook under the owner account, it should also share that notebook with the default slide-worker collaborators as editors:
+  - `worker_wly` -> `wlydsydmhmdsyd@gmail.com`
+  - `worker_daba` -> `dababyturnsintoaconvertible@gmail.com`
+- In this local environment, Stage D slide creation may use the owner account's create quota. The default slide-create order is `default`, then `worker_wly`, then `worker_daba`.
 - The local estimate is `15` slide-deck creates per profile per day, so the pool estimate is `45` per day in total.
 - When a create request fails with a quota / daily-limit style error, Codex should mark that profile as exhausted for the current day and automatically retry the same section with the next profile in the pool.
+- The local per-profile usage tracker is only a success counter, not NotebookLM's official quota source of truth. A profile can still show large local remaining capacity while NotebookLM temporarily returns `RESOURCE_EXHAUSTED` for create requests.
+- In this local environment, distinguish `temporary service-side create throttling` from `local estimated remaining capacity`. When reporting capacity to the user, explicitly label it as a local estimate rather than a guaranteed NotebookLM remaining quota.
 - In this local environment, Codex should hold the profile-pool usage / remaining-capacity summary until the final user-facing wrap-up after download and post-processing finish; do not interrupt mid-run just to report remaining quota.
 - In the final user-facing wrap-up, Codex should summarize from `create-report.json` / `course-status-summary.json` which profile created each section and the estimated same-day remaining capacity for each profile plus the pooled total remaining estimate.
 - The local post-processing defaults are:
@@ -359,3 +395,45 @@ python3 scripts/summarize_course_slide_status.py \
   - Save the final user-facing PPTX with the suffix `_水印版.pptx`.
   - Do not keep `_遮挡水印` or `_加图` as the final user-facing suffixes in subsequent runs.
   - If any slide samples a non-white or mixed background color while covering the watermark area, report those slide numbers and sampled colors back to the user for quick manual verification.
+
+## Local Reliability Notes
+
+- In this local environment, always clear `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and the lowercase variants before any `nlm` or NotebookLM API call.
+- When the user adds a new slide worker in this local environment, update all of the following in the same turn so future chats inherit the change:
+  - `scripts/common.py` -> add the worker email to `DEFAULT_NOTEBOOK_SHARE_EMAILS`
+  - `scripts/common.py` -> add the profile-to-email mapping to `EXPECTED_PROFILE_EMAILS`
+  - `scripts/create_slides_from_sources.py` -> add the worker to `DEFAULT_CREATE_PROFILE_POOL` in the intended create order
+  - `SKILL.md` -> update the local profile pool list, default collaborator list, expected mapping notes, create order, and pooled daily-capacity estimate if the pool size changed
+- In this local environment, do not stop after only editing the skill text when adding a worker. The code defaults and the skill instructions must stay aligned.
+- When the user replaces one worker with another in this local environment, update the code defaults and skill text in the same turn, but also treat the new worker as operationally incomplete until all 3 checks pass:
+  - the new worker's dedicated NotebookLM auth browser has been used for login
+  - the saved `nlm` profile has been refreshed from that same profile-bound browser
+  - the new worker has been invited to the target notebook and has passed at least one real NotebookLM API or create-path validation relevant to the current task
+- Do not trust `nlm login --check` as the source of truth on this machine; it may report `expired` even when real NotebookLM RPC calls still work.
+- Do not trust `check_auth(live=True)` as the only source of truth on this machine either; it can still report `expired` while the real NotebookLM API path is usable.
+- The preferred auth validation order in this local environment is:
+  - first, confirm the saved profile email matches the expected mapping
+  - second, validate with a real NotebookLM API call such as `NotebookLMClient(...).list_notebooks()`
+  - only use homepage-style auth checks as a secondary signal
+- Prefer refreshing credentials from each profile's own saved browser profile.
+- Never reuse an unmapped existing CDP browser across profiles; that can contaminate `default`, `worker_wly`, and `worker_daba`.
+- Expected local profile mapping:
+  - `default` -> `wuzhijian1999@gmail.com`
+  - `worker_wly` -> `wlydsydmhmdsyd@gmail.com`
+  - `worker_daba` -> `dababyturnsintoaconvertible@gmail.com`
+- If a profile refresh resolves to the wrong Google account, treat it as profile contamination and repair it before continuing.
+- When a user asks to "just open a login window" in this local environment, prefer the simplest path:
+  - for `default`, `worker_wly`, `worker_daba`, or any newly added worker, launch that profile's dedicated NotebookLM auth browser first
+  - after the user says the login is done, extract cookies from that same profile-bound CDP browser and save them directly to the matching `nlm` profile
+  - avoid repeated generic browser windows or repeated account switching in a shared normal Chrome session
+- When repairing NotebookLM slide names, avoid hardcoding Chinese titles or paths in PowerShell literals. Read the course JSON or manifest in UTF-8 inside Python and derive section titles there.
+- When validating a freshly fetched FIRA course JSON, do not trust section titles alone. Read at least one extracted non-intro section body and confirm it matches the real teaching script before uploading anything to NotebookLM.
+- For enterprise process-intelligence courses, prefer the teaching content under `赋能内容`, especially the `有声幻灯片` block, as the authoritative section body. Treat `在线训战` and similar interaction/training blocks as fallback only.
+- When rebuilding authoritative create/finalize state from a live notebook, match artifacts using the first line of `custom_instructions` (`文稿题目：...`) plus `section_id`, not only the current artifact title.
+- Long all-in-one finalize/download runs are fragile in this workspace. If a run is interrupted, inspect and stop leftover `monitor_and_finalize_slides.py` and `postprocess_downloaded_pptx.mjs` processes before resuming.
+- Resume interrupted finalize/download work in small `--section-id` batches instead of rerunning the whole course.
+- For local progress checks, count actual output files in the course directory (`*_水印版.pptx`) instead of trusting stale reports alone.
+- In this local environment, NotebookLM may auto-generate English artifact titles even when the intended section title is Chinese. For recovery, rename, and download workflows, prefer the `文稿题目：...` line inside `custom_instructions` over the current artifact title.
+- During slide creation in this local environment, treat transient RPC disconnects such as `WinError 10053` as retryable network errors and retry the same profile before marking the section failed.
+- A newly added worker can show `share_status` as `editor` and can list notebook sources, yet still return `API error (code 3): INVALID_ARGUMENT` on slide creation. Do not treat visibility alone as proof that the worker is usable for slide generation; require one successful create on the target notebook before counting that worker as reliable capacity.
+- In this local environment, after replacing a failing worker with a new worker, prefer forcing the remaining failed sections through the new worker first before resuming mixed profile-pool retries. This makes the worker validation unambiguous and reduces confusion about which account actually cleared the backlog.

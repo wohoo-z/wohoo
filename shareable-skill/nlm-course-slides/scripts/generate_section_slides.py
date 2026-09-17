@@ -104,7 +104,7 @@ def main() -> int:
     metadata_path = output_path.with_suffix(".slide.json")
     resource_title = args.resource_title or section.resource_title or default_resource_title(section.id, section.title)
     artifact_title = Path(output_name).stem
-    focus = args.focus or section.focus or build_focus_prompt(section.title)
+    focus = args.focus or section.focus or build_focus_prompt(section.title, manifest.course_title)
     source_id = None
     artifact_id = None
     current_step = "initialize"

@@ -260,23 +260,11 @@ def main() -> int:
             renamed = True
             if args.download:
                 if args.skip_local_postprocess:
-                    download_slide_deck(
-                        notebook_id,
-                        artifact_id,
-                        output_path,
-                        profile=args.profile,
-                        dry_run=args.dry_run,
-                    )
+                    download_slide_deck(notebook_id, artifact_id, output_path, dry_run=args.dry_run)
                 else:
                     with tempfile.TemporaryDirectory(prefix="nlm-course-slides-download-") as temp_dir:
                         raw_output_path = Path(temp_dir) / section.output_name
-                        download_slide_deck(
-                            notebook_id,
-                            artifact_id,
-                            raw_output_path,
-                            profile=args.profile,
-                            dry_run=args.dry_run,
-                        )
+                        download_slide_deck(notebook_id, artifact_id, raw_output_path, dry_run=args.dry_run)
                         postprocess_result = _run_local_postprocess(
                             raw_output_path,
                             final_output_path,

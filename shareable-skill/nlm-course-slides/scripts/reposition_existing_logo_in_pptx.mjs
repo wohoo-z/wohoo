@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Post-process a downloaded NotebookLM slide deck:
- * - cover the fixed lower-right watermark area with a same-color rectangle
- * - add the local default logo image near the upper-right corner
- * - export a user-facing PPTX whose name ends with "_水印版.pptx"
+ * Reposition an already-added logo in an existing PPTX deck:
+ * - cover known old logo placements with sampled background rectangles
+ * - add the logo at the new target placement
+ * - overwrite or export a single final PPTX
  */
 
 import fs from "node:fs/promises";
@@ -16,13 +16,11 @@ const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DEFAULT_IMAGE_PATH = path.resolve(SCRIPT_DIR, "..", "assets", "logo.png");
 
 const DEFAULTS = {
-  watermarkRectCm: {
-    left: 41.63,
-    top: 24.55,
-    width: 3.39,
-    height: 0.64,
-  },
-  logoRectCm: {
+  oldLogoRectsCm: [
+    { left: 39.78, top: 0.76, width: 4.51, height: 1.31 },
+    { left: 40.99, top: 0.30, width: 4.10, height: 1.19 },
+  ],
+  newLogoRectCm: {
     left: 40.26,
     top: 23.36,
     width: 4.10,
@@ -32,7 +30,6 @@ const DEFAULTS = {
     width: 6,
     height: 6,
   },
-  suffix: "_水印版",
   imagePath: DEFAULT_IMAGE_PATH,
 };
 
@@ -66,9 +63,9 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(
     [
-      "Usage: postprocess_downloaded_pptx.mjs --input <raw.pptx> --output <final_水印版.pptx> [--image-path <logo.png>]",
+      "Usage: reposition_existing_logo_in_pptx.mjs --input <existing.pptx> --output <final.pptx> [--image-path <logo.png>]",
       "",
-      "Applies the local default PPT post-processing rules to a downloaded deck.",
+      "Covers known old logo placements and adds the logo at the new target placement.",
       "",
     ].join("\n"),
   );
@@ -161,11 +158,9 @@ function pickBackgroundColor(png, rect) {
     buckets.set(key, bucket);
   }
 
-  let bestKey = "";
   let bestBucket = null;
-  for (const [key, bucket] of buckets.entries()) {
+  for (const bucket of buckets.values()) {
     if (!bestBucket || bucket.count > bestBucket.count) {
-      bestKey = key;
       bestBucket = bucket;
     }
   }
@@ -174,7 +169,6 @@ function pickBackgroundColor(png, rect) {
     hex: rgbToHex(bestBucket.r / bestBucket.count, bestBucket.g / bestBucket.count, bestBucket.b / bestBucket.count),
     sampleCount: samples.length,
     method: "dominant-neighbor-bucket",
-    bucket: bestKey,
   };
 }
 
@@ -201,7 +195,7 @@ async function resolveNodeModulesDir() {
       }
     }
   } catch {
-    // Ignore missing cache root; the explicit candidates above may still work.
+    // Ignore missing cache root.
   }
 
   for (const candidate of candidates) {
@@ -241,59 +235,60 @@ async function main() {
   const imageBytes = await fs.readFile(imagePath);
   const presentation = await artifact.PresentationFile.importPptx(await artifact.FileBlob.load(inputPath));
 
-  const watermarkRect = {
-    left: cmToPx(DEFAULTS.watermarkRectCm.left),
-    top: cmToPx(DEFAULTS.watermarkRectCm.top),
-    width: cmToPx(DEFAULTS.watermarkRectCm.width),
-    height: cmToPx(DEFAULTS.watermarkRectCm.height),
-  };
-  const logoRect = {
-    left: cmToPx(DEFAULTS.logoRectCm.left),
-    top: cmToPx(DEFAULTS.logoRectCm.top),
-    width: cmToPx(DEFAULTS.logoRectCm.width),
-    height: cmToPx(DEFAULTS.logoRectCm.height),
+  const oldLogoRects = DEFAULTS.oldLogoRectsCm.map((rect) => ({
+    left: cmToPx(rect.left),
+    top: cmToPx(rect.top),
+    width: cmToPx(rect.width),
+    height: cmToPx(rect.height),
+  }));
+  const newLogoRect = {
+    left: cmToPx(DEFAULTS.newLogoRectCm.left),
+    top: cmToPx(DEFAULTS.newLogoRectCm.top),
+    width: cmToPx(DEFAULTS.newLogoRectCm.width),
+    height: cmToPx(DEFAULTS.newLogoRectCm.height),
   };
 
   const perSlide = [];
   for (let index = 0; index < presentation.slides.items.length; index += 1) {
     const slide = presentation.slides.items[index];
     const beforeBlob = await presentation.export({ slide, format: "png", scale: 1 });
-    const beforePath = path.join(os.tmpdir(), `nlm-course-slides-postprocess-${process.pid}-${index + 1}.png`);
+    const beforePath = path.join(os.tmpdir(), `nlm-logo-reposition-${process.pid}-${index + 1}.png`);
     await saveBlob(beforePath, beforeBlob);
     const beforePng = PNG.sync.read(Buffer.from(await fs.readFile(beforePath)));
     await fs.unlink(beforePath).catch(() => {});
 
-    const colorInfo = pickBackgroundColor(beforePng, watermarkRect);
-    const mask = slide.shapes.add({
-      geometry: "rect",
-      name: `codex-watermark-mask-${String(index + 1).padStart(2, "0")}`,
-      position: watermarkRect,
-      fill: { type: "solid", color: colorInfo.hex },
-      line: { style: "solid", fill: "none", width: 0 },
-    });
-    mask.opacity = 1;
+    const maskedRegions = [];
+    for (const [rectIndex, rect] of oldLogoRects.entries()) {
+      const colorInfo = pickBackgroundColor(beforePng, rect);
+      const mask = slide.shapes.add({
+        geometry: "rect",
+        name: `codex-old-logo-mask-${String(index + 1).padStart(2, "0")}-${rectIndex + 1}`,
+        position: rect,
+        fill: { type: "solid", color: colorInfo.hex },
+        line: { style: "solid", fill: "none", width: 0 },
+      });
+      mask.opacity = 1;
+      maskedRegions.push({
+        rect_index: rectIndex + 1,
+        sampledColor: colorInfo.hex,
+        sampleCount: colorInfo.sampleCount,
+        method: colorInfo.method,
+      });
+    }
 
     const image = slide.images.add({
       blob: imageBytes,
       contentType: "image/png",
       alt: "红杉智汇标识",
-      position: logoRect,
+      position: newLogoRect,
     });
     image.lockAspectRatio = true;
 
     perSlide.push({
       slide: index + 1,
-      sampledColor: colorInfo.hex,
-      sampleCount: colorInfo.sampleCount,
-      method: colorInfo.method,
+      masked_regions: maskedRegions,
     });
   }
-
-  const colorCounts = {};
-  for (const item of perSlide) {
-    colorCounts[item.sampledColor] = (colorCounts[item.sampledColor] || 0) + 1;
-  }
-  const nonWhiteSlides = perSlide.filter((item) => item.sampledColor !== "#FFFFFF");
 
   const pptx = await artifact.PresentationFile.exportPptx(presentation);
   await pptx.save(outputPath);
@@ -307,13 +302,12 @@ async function main() {
         image_path: imagePath,
         node_modules_dir: nodeModulesDir,
         slide_count: perSlide.length,
-        suffix: DEFAULTS.suffix,
-        logo_rect_cm: DEFAULTS.logoRectCm,
+        old_logo_rects_cm: DEFAULTS.oldLogoRectsCm,
+        new_logo_rect_cm: DEFAULTS.newLogoRectCm,
         logo_scale_percent: DEFAULTS.logoScalePercent,
         logo_lock_aspect_ratio: true,
         logo_relative_to_original_size: true,
-        color_counts: colorCounts,
-        non_white_slides: nonWhiteSlides,
+        slides: perSlide,
       },
       null,
       2,

@@ -21,6 +21,7 @@ from common import (
     ensure_authenticated,
     find_section,
     load_course_manifest,
+    log_message,
     read_json,
     safe_print_json,
     sanitize_filename,
@@ -28,12 +29,6 @@ from common import (
     utc_timestamp,
     write_json,
 )
-
-DEFAULT_SLIDE_WORKER_SHARE_EMAILS = [
-    "wlydsydmhmdsyd@gmail.com",
-    "whatmatthew697@gmail.com",
-    "dababyturnsintoaconvertible@gmail.com",
-]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -70,8 +65,6 @@ def _resolve_share_emails(args: argparse.Namespace) -> list[str]:
             continue
         seen.add(clean_email)
         emails.append(clean_email)
-    if not emails and (args.profile or "default") == "default":
-        emails.extend(DEFAULT_SLIDE_WORKER_SHARE_EMAILS)
     return emails
 
 
@@ -114,8 +107,11 @@ def main() -> int:
     )
     notebook_action = "reused" if args.notebook_id else "created"
     notebook_url = build_notebook_url(notebook_id)
+    log_message(f"[upload] notebook {notebook_action}: {notebook_id}")
+    log_message(f"[upload] notebook url: {notebook_url}")
     share_results = []
     for share_email in _resolve_share_emails(args):
+        log_message(f"[upload] share notebook with {share_email} as {args.share_role}")
         share_result = share_notebook_with_collaborator(
             notebook_id,
             email=share_email,
@@ -125,11 +121,17 @@ def main() -> int:
         )
         if share_result:
             share_results.append(share_result)
+            log_message(
+                f"[upload] share result for {share_email}: {share_result.get('status') or 'ok'}"
+            )
 
     results = []
     failures = 0
     for index, section in enumerate(sections):
         resource_title = section.resource_title or default_resource_title(section.id, section.title)
+        log_message(
+            f"[upload] ({index + 1}/{len(sections)}) {section.id} {section.title}"
+        )
         try:
             source_id = add_text_source(
                 notebook_id,
@@ -149,6 +151,7 @@ def main() -> int:
                     "error": None,
                 }
             )
+            log_message(f"[upload] uploaded {section.id} -> source {source_id}")
         except Exception as exc:
             failures += 1
             results.append(
@@ -161,6 +164,7 @@ def main() -> int:
                     "error": str(exc),
                 }
             )
+            log_message(f"[upload] failed {section.id}: {exc}")
         if index < len(sections) - 1:
             time.sleep(args.api_delay_seconds)
 

@@ -14,12 +14,11 @@ import subprocess
 import sys
 import tempfile
 import time
-from contextlib import contextmanager
 from html import unescape
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 try:
     import fcntl
@@ -41,41 +40,85 @@ SECTION_PREFIX_RE = re.compile(
     r")\s*"
 )
 
-FOCUS_PROMPT_TEMPLATE = """文稿题目：{section_title}
-目标受众：
-- 流程与智能化中的企业领导者
-- 企业各个部门业务负责人
-- 企业流程与IT部门员工
-- 人工智能变革项目管理者
-这是企业流程智能化培训解决方案。
-本解决方案旨在企业流程框架（参见企业流程框架基础解决方案）的基础上，讲解人工智能对企业流程的设计、实施、运营所产生的深刻影响。
-课程为流程与智能化中的管理者和参与数智变革的人员提供数智化基础理论、实操建议和案例研究。
-请根据来源文档生成演示文稿，演示文稿要和来源文档的逻辑与核心内容严格对应，支持学员边看演示文稿边理解讲解主线、关键方法和落地动作。
-开篇尽量简洁，直入主题。
-必须遵循来源文档中的专业用语和定义。
-页数要求：10-16页，用适当的文字讲解主要内容。
-不要浪费页面讲口号，要讲具体的要点、方法、边界和案例启发。
-演示文稿以中文为主，但允许保留来源文档中已经出现的英文缩写或英文术语，例如 AI、LTC、IPD、CRM、ERP。不要额外引入来源文档里没有出现的英文单词、英文句子或纯英文标题。
-取消结尾页。
-视觉效果要求: 遵循极简的商务视觉原则，以现代企业扁平线性矢量插图为主，构图上合理留白，营造舒适的视觉呼吸感。全文稿任何地方都严禁放任何徽标（Logo）。
-底版强制要求：全部演示文稿的底版必须统一为纯白色（#FFFFFF），底版区域禁止出现任何底纹、网格线、辅助线、水印、杂色及各类装饰性背景元素，保证底版干净无杂质。
-配图、图标等须使用品牌色，即绿色（RGB 0-176-80），橙色（RGB 255-153-0），蓝色（RGB 51-153-255），可适当加入浅绿色（RGB 97-209-116）、浅橙色（RGB 255-194-102）、浅蓝色（RGB 153-204-255），严禁使用粉色系颜色。"""
-
 FIRA_SKIP_CHAPTER_NAMES = {"训战启程", "训战总结、训战输出", "满意度调查"}
-PROMPT_TITLE_RE = re.compile(r"文稿题目：([^\n\r]+)")
+PROMPT_TITLE_RE = re.compile(r"文稿题目：?\s*([^\n\r]+)")
+DEFAULT_PROMPT_AUDIENCE = (
+    "流程与智能化中的企业领导者、企业各个部门业务负责人、企业流程与IT部门员工、"
+    "人工智能变革项目管理者。请使用面向管理者与变革参与者的专业中文，兼顾业务理解、"
+    "流程协同与落地执行。"
+)
+DEFAULT_PROMPT_SOURCE_FRAMING = (
+    "这是企业流程智能化培训解决方案。本解决方案旨在企业流程框架（参见企业流程框架基础解决方案）"
+    "的基础上，讲解人工智能对企业流程的设计、实施、运营所产生的深刻影响。课程为流程与智能化中的"
+    "管理者和参与数智变革的人员提供数智化基础理论、实操建议和案例研究。"
+)
+DEFAULT_PROMPT_GENERATION_REQUIREMENTS = (
+    "请根据来源文档生成演示文稿，演示文稿要和来源文档的逻辑、观点与核心内容严格对应，帮助学员边看"
+    "演示文稿边听讲解时，更提纲挈领地理解关键机制、方法、判断依据与管理动作，并据此推动实际变革。"
+    "开篇尽量简洁，直入主题。必须遵循来源文档中的专业术语和定义。页数要求：10-16页，用适当的文字讲清"
+    "主要内容。不要浪费页面讲口号，要讲具体要点、方法、证据和行动。语言要求：演示文稿以中文为主，优先"
+    "使用中文表达。若来源文档中已出现并实际使用了英文专业缩写或英文术语，如 MCR、ISC、AI、LTC、IPD、"
+    "CRM、ERP 等，可在演示文稿中保留这些原始术语，但不要额外引入来源文档中没有的英文单词、英文句子或"
+    "纯英文标题。除专业缩写和原文已有术语外，其余内容均使用中文。特殊情况：若出现电话号码，使用阿拉伯"
+    "数字。取消结尾页。"
+)
+CHANGE_MANAGEMENT_PROMPT_AUDIENCE = (
+    "企业变革项目发起人、企业管理者、各部门业务负责人、流程与IT部门员工、参与数智化转型与AI变革的"
+    "项目管理者。请使用面向管理者与变革参与者的专业中文，兼顾业务理解、组织推动、流程协同与落地执行。"
+)
+CHANGE_MANAGEMENT_PROMPT_SOURCE_FRAMING = (
+    "这是管理变革流程智能化培训解决方案。本解决方案围绕企业管理变革流程，讲解人工智能如何赋能变革"
+    "项目的识别、立项、诊断、规划、试点验证、推广落地与运营转化，帮助企业在流程框架基础上提升变革"
+    "成功率与持续运营能力。课程为管理变革中的领导者、项目负责人和参与数智变革的人员提供基础理论、"
+    "实操建议和案例研究。"
+)
+CHANGE_MANAGEMENT_PROMPT_GENERATION_REQUIREMENTS = (
+    "请根据来源文档生成演示文稿，演示文稿要和来源文档的逻辑、观点与核心内容严格对应，帮助学员边看"
+    "演示文稿边听讲解时，更提纲挈领地理解管理变革流程中的关键机制、方法、判断依据、治理动作与落地路径，"
+    "并据此推动实际变革。开篇尽量简洁，直入主题。必须遵循来源文档中的专业术语和定义，不要擅自替换变革"
+    "管理、流程管理、项目治理、组织协同、AI赋能等核心概念。页数要求：10-16页，用适当的文字讲清主要内容。"
+    "不要浪费页面讲口号，要讲具体要点、方法、证据、案例和行动。语言要求：演示文稿以中文为主，优先使用"
+    "中文表达。若来源文档中已出现并实际使用了英文专业缩写或英文术语，如 AI、LTC、IPD、CRM、ERP 等，可"
+    "在演示文稿中保留这些原始术语，但不要额外引入来源文档中没有的英文单词、英文句子或纯英文标题。除专业"
+    "缩写和原文已有术语外，其余内容均使用中文。特殊情况：若出现电话号码，使用阿拉伯数字。取消结尾页。"
+)
+PROMPT_VISUAL_REQUIREMENTS = (
+    "遵循极简的商务视觉原则，以现代企业扁平线性矢量插图为主，构图上合理留白，营造舒适的视觉呼吸感。"
+    "全文稿任何地方都严禁放任何徽标（Logo）。底版强制要求：全部演示文稿的底版必须统一为纯白色（#FFFFFF），"
+    "底版区域禁止出现任何底纹、网格线、辅助线、水印、杂色及各类装饰性背景元素，保证底版干净无杂质。配图、"
+    "图标等须使用品牌色，即绿色（RGB 0-176-80），橙色（RGB 255-153-0），蓝色（RGB 51-153-255），可适当加入"
+    "浅绿色（RGB 97-209-116）、浅橙色（RGB 255-194-102）、浅蓝色（RGB 153-204-255），严禁使用粉色系颜色。"
+)
+PREFERRED_FIRA_BLOCK_NAMES = [
+    "有声幻灯片",
+    "文字讲解",
+    "本节要点",
+]
+DEPRIORITIZED_FIRA_VERTICAL_KEYWORDS = [
+    "训战",
+    "练习",
+    "测试",
+    "互动",
+    "测验",
+    "quiz",
+]
 NLM_API_DELAY_SECONDS = 15.0
 NLM_STATUS_API_DELAY_SECONDS = 60.0
 NLM_RATE_LIMIT_MAX_DELAY_SECONDS = 240.0
 NLM_RATE_LIMIT_MAX_RETRIES = 4
 NLM_RATE_LIMIT_LOCK_PATH = Path(tempfile.gettempdir()) / "nlm-course-slides.rate-limit.lock"
 NLM_STATUS_RATE_LIMIT_LOCK_PATH = Path(tempfile.gettempdir()) / "nlm-course-slides.status-rate-limit.lock"
-DEFAULT_NOTEBOOK_SHARE_EMAIL = ""
-DEFAULT_NOTEBOOK_SHARE_EMAILS: list[str] = [
+DEFAULT_NOTEBOOK_SHARE_EMAIL = "wlydsydmhmdsyd@gmail.com"
+DEFAULT_NOTEBOOK_SHARE_EMAILS = [
     "wlydsydmhmdsyd@gmail.com",
-    "whatmatthew697@gmail.com",
     "dababyturnsintoaconvertible@gmail.com",
 ]
 DEFAULT_NOTEBOOK_SHARE_ROLE = "editor"
+EXPECTED_PROFILE_EMAILS = {
+    "default": "wuzhijian1999@gmail.com",
+    "worker_wly": "wlydsydmhmdsyd@gmail.com",
+    "worker_daba": "dababyturnsintoaconvertible@gmail.com",
+}
 
 
 def _lock_file(handle: Any) -> None:
@@ -175,8 +218,44 @@ def strip_section_prefix(title: str) -> str:
     return cleaned or title.strip()
 
 
-def build_focus_prompt(title: str) -> str:
-    return FOCUS_PROMPT_TEMPLATE.format(section_title=strip_section_prefix(title))
+def detect_prompt_profile(course_title: str | None) -> str:
+    normalized = str(course_title or "").strip()
+    if "变革流程智能化" in normalized:
+        return "change_management"
+    return "default_enterprise_process"
+
+
+def describe_focus_prompt_adjustments(course_title: str | None) -> list[str]:
+    profile = detect_prompt_profile(course_title)
+    if profile == "change_management":
+        return [
+            "把目标受众从通用流程智能化受众收紧为变革项目发起人、管理者、业务负责人、流程与IT员工及AI变革项目管理者。",
+            "把来源文档说明改为“管理变革流程智能化培训解决方案”，突出识别、立项、诊断、规划、试点验证、推广落地与运营转化。",
+            "把生成要求改为围绕管理变革流程的机制、治理动作与落地路径展开，并删除不适用的 HR 专项术语约束。",
+        ]
+    return [
+        "沿用企业流程智能化通用模板，根据来源文档保持专业中文、流程协同和落地执行导向。",
+    ]
+
+
+def build_focus_prompt(title: str, course_title: str | None = None) -> str:
+    section_title = strip_section_prefix(title)
+    profile = detect_prompt_profile(course_title)
+    if profile == "change_management":
+        audience = CHANGE_MANAGEMENT_PROMPT_AUDIENCE
+        source_framing = CHANGE_MANAGEMENT_PROMPT_SOURCE_FRAMING
+        generation_requirements = CHANGE_MANAGEMENT_PROMPT_GENERATION_REQUIREMENTS
+    else:
+        audience = DEFAULT_PROMPT_AUDIENCE
+        source_framing = DEFAULT_PROMPT_SOURCE_FRAMING
+        generation_requirements = DEFAULT_PROMPT_GENERATION_REQUIREMENTS
+    return (
+        f"文稿题目：{section_title}\n"
+        f"目标受众：{audience}\n"
+        f"来源文档说明：{source_framing}\n"
+        f"生成要求：{generation_requirements}\n"
+        f"视觉效果要求: {PROMPT_VISUAL_REQUIREMENTS}"
+    )
 
 
 def parse_first_uuid(text: str) -> str:
@@ -211,41 +290,6 @@ def safe_print_json(payload: Any) -> None:
 def configure_nlm_api_delay(delay_seconds: float) -> None:
     global NLM_API_DELAY_SECONDS
     NLM_API_DELAY_SECONDS = max(0.0, delay_seconds)
-
-
-def _load_profile_auth(profile: str | None = None) -> Any:
-    from notebooklm_tools.core.auth import AuthManager
-
-    auth = AuthManager(profile) if profile else AuthManager()
-    return auth.load_profile()
-
-
-@contextmanager
-def notebooklm_client(profile: str | None = None) -> Iterator[Any]:
-    from notebooklm_tools.core.client import NotebookLMClient
-
-    saved_profile = _load_profile_auth(profile)
-    with NotebookLMClient(
-        cookies=saved_profile.cookies,
-        csrf_token=saved_profile.csrf_token or "",
-        session_id=saved_profile.session_id or "",
-        build_label=saved_profile.build_label or "",
-    ) as client:
-        yield client
-
-
-def _slide_deck_format_code(deck_format: str) -> int:
-    from notebooklm_tools.core import constants
-
-    normalized = str(deck_format or "").strip().lower()
-    return constants.SLIDE_DECK_FORMATS.get_code(normalized or "detailed_deck")
-
-
-def _slide_deck_length_code(length: str) -> int:
-    from notebooklm_tools.core import constants
-
-    normalized = str(length or "").strip().lower()
-    return constants.SLIDE_DECK_LENGTHS.get_code(normalized or "default")
 
 
 def _is_nlm_command(args: list[str]) -> bool:
@@ -321,6 +365,7 @@ def _is_transient_network_error(text: str) -> bool:
     markers = [
         "unexpected_eof_while_reading",
         "connecterror",
+        "winerror 10053",
         "connection reset",
         "connection aborted",
         "temporarily unavailable",
@@ -444,29 +489,205 @@ def run_cmd(
         return stdout if capture_output else ""
 
 
+def _refresh_auth_from_saved_browser_profile(profile: str | None) -> bool:
+    if not profile:
+        return False
+
+    try:
+        from notebooklm_tools.core.auth import AuthManager
+        from notebooklm_tools.utils.cdp import (
+            _normalize_ws_url,
+            _wait_for_page_ready,
+            extract_build_label,
+            extract_csrf_token,
+            extract_email,
+            extract_session_id,
+            find_available_port,
+            find_or_create_notebooklm_page,
+            get_debugger_url,
+            get_page_cookies,
+            launch_chrome_process,
+            terminate_chrome,
+        )
+    except Exception as exc:
+        log_message(f"[auth-refresh] unavailable for profile '{profile}': {exc}")
+        return False
+
+    port = None
+    process = None
+    try:
+        port = find_available_port()
+        process = launch_chrome_process(port=port, headless=True, profile_name=profile)
+        if process is None:
+            log_message(f"[auth-refresh] could not start headless browser for '{profile}'")
+            return False
+
+        debugger_url = get_debugger_url(port, tries=10, timeout=2)
+        if not debugger_url:
+            log_message(f"[auth-refresh] no CDP debugger available for '{profile}' on port {port}")
+            return False
+
+        page = find_or_create_notebooklm_page(port)
+        if not page:
+            log_message(f"[auth-refresh] could not open NotebookLM page for '{profile}'")
+            return False
+
+        ws_url = _normalize_ws_url(page.get("webSocketDebuggerUrl"))
+        if not ws_url:
+            log_message(f"[auth-refresh] missing page websocket for '{profile}'")
+            return False
+
+        html, _ready = _wait_for_page_ready(ws_url, timeout=20)
+        cookies = get_page_cookies(ws_url)
+        if not cookies:
+            log_message(f"[auth-refresh] no cookies extracted for '{profile}'")
+            return False
+
+        email = extract_email(html).strip().lower()
+        expected_email = EXPECTED_PROFILE_EMAILS.get(profile, "").strip().lower()
+        if expected_email and email and email != expected_email:
+            log_message(
+                f"[auth-refresh] profile '{profile}' is logged into '{email}', expected '{expected_email}'"
+            )
+            return False
+
+        csrf_token = extract_csrf_token(html) or None
+        session_id = extract_session_id(html) or None
+        build_label = extract_build_label(html) or None
+        AuthManager(profile).save_profile(
+            cookies,
+            csrf_token=csrf_token,
+            session_id=session_id,
+            email=email or None,
+            force=True,
+            build_label=build_label,
+        )
+        log_message(f"[auth-refresh] refreshed saved credentials for '{profile}'")
+        return True
+    except Exception as exc:
+        log_message(f"[auth-refresh] failed for '{profile}': {exc}")
+        return False
+    finally:
+        if process is not None:
+            try:
+                terminate_chrome(process, port)
+            except Exception:
+                pass
+
+
+def _validate_profile_via_notebook_api(profile: str | None) -> bool:
+    try:
+        from notebooklm_tools.core.auth import AuthManager
+        from notebooklm_tools.core.client import NotebookLMClient
+    except Exception:
+        return False
+
+    target_profile = profile or "default"
+    try:
+        saved = AuthManager(target_profile).load_profile(force_reload=True)
+    except Exception:
+        return False
+
+    expected_email = EXPECTED_PROFILE_EMAILS.get(target_profile, "").strip().lower()
+    actual_email = str(saved.email or "").strip().lower()
+    if expected_email and actual_email and actual_email != expected_email:
+        log_message(
+            f"[auth-check] profile '{target_profile}' stored email '{actual_email}' does not match expected '{expected_email}'"
+        )
+        return False
+
+    try:
+        with NotebookLMClient(
+            cookies=saved.cookies,
+            csrf_token=saved.csrf_token or "",
+            session_id=saved.session_id or "",
+            build_label=saved.build_label or "",
+        ) as client:
+            client.list_notebooks()
+        return True
+    except Exception as exc:
+        log_message(f"[auth-check] real NotebookLM API validation failed for '{target_profile}': {exc}")
+        return False
+
+
 def ensure_authenticated(*, profile: str | None = None, dry_run: bool = False) -> None:
     if dry_run:
+        args = ["nlm", "login", "--check"]
+        if profile:
+            args.extend(["--profile", profile])
+        run_cmd(args, dry_run=True)
         return
+
+    if _validate_profile_via_notebook_api(profile):
+        return
+
+    args = ["nlm", "login", "--check"]
+    if profile:
+        args.extend(["--profile", profile])
 
     attempts = 0
     while True:
-        try:
-            with notebooklm_client(profile) as client:
-                client.list_notebooks()
+        _rate_limit_nlm_command(args)
+        completed = subprocess.run(
+            _subprocess_args(args),
+            text=True,
+            capture_output=True,
+            encoding="utf-8",
+            errors="replace",
+            check=False,
+        )
+        stdout = completed.stdout or ""
+        stderr = completed.stderr or ""
+        if completed.returncode == 0:
             return
-        except Exception as exc:
-            error_text = str(exc)
-            if _is_transient_network_error(error_text) and attempts < 2:
-                attempts += 1
+
+        combined = f"{stdout}\n{stderr}"
+        lowered = combined.lower()
+        if _is_transient_network_error(combined) and attempts < 2:
+            attempts += 1
+            log_message(
+                f"[auth-check] transient NotebookLM network error on attempt {attempts} for "
+                f"{shlex.join(args)}; retry in 3s"
+            )
+            time.sleep(3)
+            continue
+        if _is_transient_network_error(combined):
+            if _refresh_auth_from_saved_browser_profile(profile):
                 log_message(
-                    f"[auth-check] transient NotebookLM network error on attempt {attempts} "
-                    f"for profile {profile or 'default'}; retry in 3s"
+                    f"[auth-check] bypassing unreliable login check after transient network errors for "
+                    f"'{profile or 'default'}'; proceeding with refreshed saved browser credentials"
                 )
-                time.sleep(3)
-                continue
-            raise RuntimeError(
-                f"NotebookLM authentication failed for profile {profile or 'default'}: {error_text}"
-            ) from exc
+                return
+            log_message(
+                f"[auth-check] bypassing unreliable login check after transient network errors for "
+                f"'{profile or 'default'}'; continuing and letting the next NotebookLM RPC validate auth"
+            )
+            return
+
+        auth_markers = [
+            "authentication failed",
+            "authentication expired",
+            "run 'nlm login'",
+            "run `nlm login`",
+            "no saved profile",
+            "profile not found",
+            "credentials not found",
+        ]
+        if any(marker in lowered for marker in auth_markers):
+            if _refresh_auth_from_saved_browser_profile(profile):
+                log_message(f"[auth-check] recovered NotebookLM login from saved browser profile for '{profile}'")
+                return
+            login_args = ["nlm", "login", "--force"]
+            if profile:
+                login_args.extend(["--profile", profile])
+            log_message(f"[auth-check] refresh NotebookLM login via {shlex.join(login_args)}")
+            run_cmd(login_args, dry_run=False)
+            return
+
+        raise RuntimeError(
+            f"Authentication check failed with exit code {completed.returncode}: {shlex.join(args)}\n"
+            f"STDOUT:\n{stdout}\nSTDERR:\n{stderr}"
+        )
 
 
 def create_notebook(
@@ -475,14 +696,11 @@ def create_notebook(
     profile: str | None = None,
     dry_run: bool = False,
 ) -> str:
-    if dry_run:
-        return "dry-run-notebook-id"
-    with notebooklm_client(profile) as client:
-        notebook = client.create_notebook(title)
-    notebook_id = str(getattr(notebook, "id", "") or "").strip()
-    if not notebook_id:
-        raise RuntimeError(f"NotebookLM did not return a notebook ID for '{title}'.")
-    return notebook_id
+    args = ["nlm", "notebook", "create", title]
+    if profile:
+        args.extend(["--profile", profile])
+    output = run_cmd(args, dry_run=dry_run)
+    return "dry-run-notebook-id" if dry_run else parse_first_uuid(output)
 
 
 def get_notebooklm_base_url() -> str:
@@ -509,17 +727,10 @@ def share_notebook_with_collaborator(
     if clean_role not in {"viewer", "editor"}:
         raise RuntimeError(f"Unsupported collaborator role: {clean_role}")
 
-    if not dry_run:
-        with notebooklm_client(profile) as client:
-            shared = client.add_collaborator(
-                notebook_id,
-                clean_email,
-                role=clean_role,
-            )
-        if not shared:
-            raise RuntimeError(
-                f"NotebookLM did not confirm collaborator sharing for {clean_email}."
-            )
+    args = ["nlm", "share", "invite", notebook_id, clean_email, "--role", clean_role]
+    if profile:
+        args.extend(["--profile", profile])
+    run_cmd(args, dry_run=dry_run)
     return {
         "email": clean_email,
         "role": clean_role,
@@ -537,18 +748,40 @@ def add_text_source(
     wait_timeout: float = 600.0,
 ) -> str:
     if dry_run:
-        return "dry-run-source-id"
-    with notebooklm_client(profile) as client:
-        source_result = client.add_text_source(
+        args = [
+            "nlm",
+            "source",
+            "add",
             notebook_id,
-            text,
+            "--text",
+            f"<{len(text)} chars>",
+            "--title",
+            title,
+            "--wait",
+            "--wait-timeout",
+            str(wait_timeout),
+        ]
+        if profile:
+            args.extend(["--profile", profile])
+        run_cmd(args, dry_run=True)
+        return "dry-run-source-id"
+
+    from notebooklm_tools.cli.utils import get_client
+    from notebooklm_tools.services import sources as sources_service
+
+    with get_client(profile) as client:
+        result = sources_service.add_source(
+            client,
+            notebook_id,
+            "text",
+            text=text,
             title=title,
             wait=True,
             wait_timeout=wait_timeout,
         )
-    source_id = str((source_result or {}).get("id") or "").strip()
+    source_id = str(result.get("source_id") or "").strip()
     if not source_id:
-        raise RuntimeError(f"NotebookLM did not return a source ID for '{title}'.")
+        raise RuntimeError(f"NotebookLM text upload returned no source_id: {json.dumps(result, ensure_ascii=False)}")
     return source_id
 
 
@@ -564,21 +797,63 @@ def create_slide_deck(
     dry_run: bool = False,
 ) -> str:
     if dry_run:
-        return "dry-run-artifact-id"
-    with notebooklm_client(profile) as client:
-        artifact = client.create_slide_deck(
+        args = [
+            "nlm",
+            "slides",
+            "create",
             notebook_id,
-            source_ids=[source_id],
-            format_code=_slide_deck_format_code(deck_format),
-            length_code=_slide_deck_length_code(length),
-            language=language,
-            focus_prompt=focus or "",
-        )
-    artifact_id = str((artifact or {}).get("artifact_id") or "").strip()
+            "--format",
+            deck_format,
+            "--length",
+            length,
+            "--language",
+            language,
+            "--source-ids",
+            source_id,
+            "--confirm",
+        ]
+        if focus:
+            args.extend(["--focus", f"<{len(focus)} chars>"])
+        if profile:
+            args.extend(["--profile", profile])
+        run_cmd(args, dry_run=True)
+        return "dry-run-artifact-id"
+
+    from notebooklm_tools.cli.utils import get_client
+    from notebooklm_tools.services import studio as studio_service
+
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            with get_client(profile) as client:
+                result = studio_service.create_artifact(
+                    client,
+                    notebook_id,
+                    "slide_deck",
+                    source_ids=[source_id],
+                    slide_format=deck_format,
+                    slide_length=length,
+                    language=language,
+                    focus_prompt=focus or "",
+                )
+            break
+        except Exception as exc:
+            last_error = exc
+            if attempt >= 2 or not _is_transient_network_error(str(exc)):
+                raise
+            delay_seconds = 3 * (attempt + 1)
+            log_message(
+                f"[slide-create] transient network error for '{profile or 'default'}' on attempt "
+                f"{attempt + 1}/3; retry in {delay_seconds}s: {exc}"
+            )
+            time.sleep(delay_seconds)
+    else:
+        assert last_error is not None
+        raise last_error
+
+    artifact_id = str(result.get("artifact_id") or "").strip()
     if not artifact_id:
-        raise RuntimeError(
-            f"NotebookLM did not return an artifact ID while creating slides for source {source_id}."
-        )
+        raise RuntimeError(f"NotebookLM slide creation returned no artifact_id: {json.dumps(result, ensure_ascii=False)}")
     return artifact_id
 
 
@@ -598,45 +873,48 @@ def wait_for_artifact(
     transient_failures = 0
 
     while time.time() < deadline:
+        saw_transient_error = False
         try:
-            with notebooklm_client(profile) as client:
-                payload = client.get_studio_status(notebook_id)
+            payload = list_notebook_artifacts(notebook_id, profile=profile, dry_run=False)
+            for item in payload:
+                if _coerce_id(item) != artifact_id:
+                    continue
+                status = _coerce_status(item)
+                if status == "completed":
+                    return item
+                if status in {"failed", "cancelled", "canceled"}:
+                    raise RuntimeError(
+                        f"Artifact {artifact_id} ended with status '{status}': {json.dumps(item, ensure_ascii=False)}"
+                    )
+                break
         except Exception as exc:
-            error_text = str(exc)
-            if _is_transient_network_error(error_text):
-                transient_failures += 1
-                log_message(
-                    f"[artifact {artifact_id}] status query temporarily unavailable "
-                    f"(consecutive={transient_failures}), retry in {poll_interval} seconds"
-                )
-                time.sleep(poll_interval)
-                continue
-            raise RuntimeError(
-                f"Status query returned an error for artifact {artifact_id}: {error_text}"
-            ) from exc
-
-        transient_failures = 0
-        if not isinstance(payload, list):
-            raise RuntimeError(
-                f"Unexpected status payload for artifact {artifact_id}: {json.dumps(payload, ensure_ascii=False)}"
+            message = str(exc).lower()
+            saw_transient_error = any(
+                marker in message
+                for marker in [
+                    "timed out",
+                    "timeout",
+                    "temporarily unavailable",
+                    "503 service unavailable",
+                    "connection reset",
+                ]
             )
+            if not saw_transient_error:
+                raise
 
-        for item in payload:
-            # NotebookLM status payloads may expose either `id` or `artifact_id`.
-            candidate_id = str(item.get("id") or item.get("artifact_id") or "")
-            if candidate_id != artifact_id:
-                continue
-            status = str(item.get("status") or "").lower()
-            if status == "completed":
-                return item
-            if status in {"failed", "cancelled", "canceled"}:
-                raise RuntimeError(
-                    f"Artifact {artifact_id} ended with status '{status}': {json.dumps(item, ensure_ascii=False)}"
-                )
-            break
+        if saw_transient_error:
+            transient_failures += 1
+            log_message(
+                f"[artifact {artifact_id}] status query temporarily unavailable "
+                f"(consecutive={transient_failures}), retry in {poll_interval} seconds"
+            )
+        else:
+            transient_failures = 0
         time.sleep(poll_interval)
 
-    raise TimeoutError(f"Timed out waiting for artifact {artifact_id} after {timeout_seconds} seconds.")
+    raise TimeoutError(
+        f"Timed out waiting for artifact {artifact_id} after {timeout_seconds} seconds."
+    )
 
 
 def rename_artifact(
@@ -647,11 +925,19 @@ def rename_artifact(
     dry_run: bool = False,
 ) -> None:
     if dry_run:
+        args = ["nlm", "rename", "studio"]
+        if profile:
+            args.extend(["--profile", profile])
+        args.extend([artifact_id, new_title])
+        run_cmd(args, dry_run=True)
         return
-    with notebooklm_client(profile) as client:
-        renamed = client.rename_studio_artifact(artifact_id, new_title)
-    if not renamed:
-        raise RuntimeError(f"NotebookLM did not confirm rename for artifact {artifact_id}.")
+
+    from notebooklm_tools.cli.utils import get_client
+
+    with get_client(profile) as client:
+        ok = client.rename_studio_artifact(artifact_id, new_title)
+    if not ok:
+        raise RuntimeError(f"NotebookLM rename_studio_artifact failed for {artifact_id} -> {new_title}")
 
 
 def download_slide_deck(
@@ -678,8 +964,6 @@ def download_slide_deck(
             file_format,
             notebook_id,
         ]
-        if profile:
-            args.extend(["--profile", profile])
         run_cmd(args, dry_run=True)
         return
 
@@ -687,15 +971,16 @@ def download_slide_deck(
     from notebooklm_tools.core.client import NotebookLMClient
 
     attempts = 0
+    refresh_attempted = False
+    target_profile = profile or "default"
     while True:
         try:
-            auth = AuthManager(profile) if profile else AuthManager()
-            saved_profile = auth.load_profile()
+            saved = AuthManager(target_profile).load_profile(force_reload=True)
             with NotebookLMClient(
-                cookies=saved_profile.cookies,
-                csrf_token=saved_profile.csrf_token or "",
-                session_id=saved_profile.session_id or "",
-                build_label=saved_profile.build_label or "",
+                cookies=saved.cookies,
+                csrf_token=saved.csrf_token or "",
+                session_id=saved.session_id or "",
+                build_label=saved.build_label or "",
             ) as client:
                 client.download_slide_deck(
                     notebook_id,
@@ -704,18 +989,29 @@ def download_slide_deck(
                     file_format=file_format,
                 )
             return
-        except RuntimeError as exc:
+        except Exception as exc:
+            lowered = str(exc).lower()
+            auth_markers = [
+                "authentication failed",
+                "authentication expired",
+                "run 'nlm login'",
+                "run `nlm login`",
+                "credentials not found",
+            ]
+            if (
+                target_profile != "default"
+                and not refresh_attempted
+                and any(marker in lowered for marker in auth_markers)
+            ):
+                refresh_attempted = True
+                if _refresh_auth_from_saved_browser_profile(target_profile):
+                    log_message(
+                        f"[download {artifact_id}] refreshed saved credentials for '{target_profile}' "
+                        "after auth failure; retry immediately"
+                    )
+                    continue
             if attempts >= retry_attempts:
                 raise
-            attempts += 1
-            log_message(
-                f"[download {artifact_id}] download failed on attempt {attempts}: {exc}. "
-                f"Retry in {retry_delay_seconds:.0f}s"
-            )
-            time.sleep(retry_delay_seconds)
-        except Exception as exc:
-            if attempts >= retry_attempts:
-                raise RuntimeError(str(exc)) from exc
             attempts += 1
             log_message(
                 f"[download {artifact_id}] download failed on attempt {attempts}: {exc}. "
@@ -752,6 +1048,11 @@ def _first_non_empty(mapping: dict[str, Any], keys: list[str]) -> Any:
 
 
 def _coerce_title(item: dict[str, Any]) -> str:
+    custom_instructions = str(item.get("custom_instructions") or "").strip()
+    match = PROMPT_TITLE_RE.search(custom_instructions)
+    if match:
+        return match.group(1).strip()
+
     value = _first_non_empty(
         item,
         [
@@ -765,11 +1066,6 @@ def _coerce_title(item: dict[str, Any]) -> str:
             "sourceTitle",
         ],
     )
-    if value in (None, "", [], {}):
-        custom_instructions = str(item.get("custom_instructions") or "").strip()
-        match = PROMPT_TITLE_RE.search(custom_instructions)
-        if match:
-            value = match.group(1).strip()
     return str(value or "").strip()
 
 
@@ -815,7 +1111,10 @@ def list_notebook_sources(
 ) -> list[dict[str, Any]]:
     if dry_run:
         return []
-    with notebooklm_client(profile) as client:
+
+    from notebooklm_tools.cli.utils import get_client
+
+    with get_client(profile) as client:
         payload = client.get_notebook_sources_with_types(notebook_id)
     if not isinstance(payload, list):
         raise RuntimeError(f"Unexpected source list payload: {json.dumps(payload, ensure_ascii=False)}")
@@ -830,11 +1129,30 @@ def list_notebook_artifacts(
 ) -> list[dict[str, Any]]:
     if dry_run:
         return []
-    with notebooklm_client(profile) as client:
+
+    from notebooklm_tools.cli.utils import get_client
+
+    with get_client(profile) as client:
         payload = client.get_studio_status(notebook_id)
     if not isinstance(payload, list):
         raise RuntimeError(f"Unexpected artifact list payload: {json.dumps(payload, ensure_ascii=False)}")
-    return payload
+    normalized: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, dict):
+            continue
+        normalized.append(
+            {
+                "artifact_id": item.get("artifact_id"),
+                "title": item.get("title"),
+                "status": item.get("status"),
+                "custom_instructions": item.get("custom_instructions"),
+                "source_ids": item.get("source_ids") or item.get("sources") or [],
+                "slide_deck_url": item.get("slide_deck_url"),
+                "created_at": item.get("created_at"),
+                "type": item.get("type"),
+            }
+        )
+    return normalized
 
 
 def match_sections_to_notebook_state(
@@ -1276,6 +1594,149 @@ def extract_fira_section_content(section_data: dict[str, Any]) -> str:
 
     texts = voiced_slide_texts or summary_texts or teaching_texts or fallback_texts
     return "\n\n".join(texts).strip()
+
+
+def _is_deprioritized_fira_vertical(vertical_name: str) -> bool:
+    lowered = vertical_name.casefold()
+    return any(keyword.casefold() in lowered for keyword in DEPRIORITIZED_FIRA_VERTICAL_KEYWORDS)
+
+
+def _fira_block_priority(block_name: str) -> int:
+    normalized = str(block_name or "").strip()
+    try:
+        return PREFERRED_FIRA_BLOCK_NAMES.index(normalized)
+    except ValueError:
+        return len(PREFERRED_FIRA_BLOCK_NAMES)
+
+
+def _load_fira_course_structure_manifest(data: dict[str, Any], source: Path) -> CourseManifest:
+    course_info = data.get("course_info_statistics") or {}
+    course_title = str(
+        course_info.get("display_name") or data.get("name") or data.get("course_title") or source.stem
+    ).strip()
+    items = data.get("course_structure") or []
+    if not isinstance(items, list):
+        raise RuntimeError(f"FIRA course_structure must be a list: {source}")
+
+    chapters: list[dict[str, Any]] = []
+    sequentials_by_parent: dict[str, list[dict[str, Any]]] = {}
+    verticals_by_parent: dict[str, list[dict[str, Any]]] = {}
+    html_blocks_by_parent: dict[str, list[dict[str, Any]]] = {}
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        metadata = _parse_embedded_json(item.get("metadata"))
+        if not isinstance(metadata, dict):
+            metadata = {}
+        prepared = dict(item)
+        prepared["_parent"] = str(metadata.get("parent") or "").strip()
+        category = str(item.get("category") or "").strip()
+        parent = prepared["_parent"]
+        if category == "chapter":
+            chapters.append(prepared)
+        elif category == "sequential" and parent:
+            sequentials_by_parent.setdefault(parent, []).append(prepared)
+        elif category == "vertical" and parent:
+            verticals_by_parent.setdefault(parent, []).append(prepared)
+        elif category == "html" and parent:
+            html_blocks_by_parent.setdefault(parent, []).append(prepared)
+
+    def ordered(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return sorted(entries, key=lambda entry: str(entry.get("block_order") or ""))
+
+    sections: list[Section] = []
+    counter = 0
+
+    for chapter in ordered(chapters):
+        chapter_name = str(chapter.get("name") or "").strip()
+        if chapter_name in FIRA_SKIP_CHAPTER_NAMES:
+            continue
+
+        chapter_location = str(chapter.get("block_location") or "").strip()
+        chapter_sections = ordered(sequentials_by_parent.get(chapter_location, []))
+        for index, sequential in enumerate(chapter_sections):
+            if index == 0:
+                continue
+
+            title = str(sequential.get("name") or "").strip()
+            if not title:
+                continue
+
+            vertical_entries = []
+            sequential_location = str(sequential.get("block_location") or "").strip()
+            for vertical in ordered(verticals_by_parent.get(sequential_location, [])):
+                blocks = []
+                vertical_location = str(vertical.get("block_location") or "").strip()
+                for block in ordered(html_blocks_by_parent.get(vertical_location, [])):
+                    text = _extract_course_structure_block_text(block)
+                    if text:
+                        blocks.append({"name": block.get("name"), "text": text})
+                if blocks:
+                    vertical_entries.append({"name": vertical.get("name"), "blocks": blocks})
+
+            content = extract_fira_section_content({"verticals": vertical_entries})
+            if not content:
+                continue
+
+            counter += 1
+            section_id = extract_section_id(title) or str(counter)
+            sections.append(
+                Section(
+                    id=section_id,
+                    order=counter,
+                    title=title,
+                    content=content,
+                    slug=slugify(strip_section_prefix(title), fallback=f"section-{counter}"),
+                    output_name=default_output_name(section_id, title),
+                    resource_title=default_resource_title(section_id, title),
+                )
+            )
+
+    if not sections:
+        raise RuntimeError(f"No slide-generation sections were found in {source}")
+
+    return CourseManifest(
+        course_title=course_title,
+        sections=sections,
+        source_path=str(source.resolve()),
+    )
+
+
+def extract_fira_section_content(section_data: dict[str, Any]) -> str:
+    prioritized_buckets: list[list[str]] = [[] for _ in range(len(PREFERRED_FIRA_BLOCK_NAMES) + 1)]
+    fallback_buckets: list[list[str]] = [[] for _ in range(len(PREFERRED_FIRA_BLOCK_NAMES) + 1)]
+
+    for vertical in section_data.get("verticals") or []:
+        if not isinstance(vertical, dict):
+            continue
+        vertical_name = str(vertical.get("name") or "").strip()
+        preferred_here: list[list[str]] = [[] for _ in range(len(PREFERRED_FIRA_BLOCK_NAMES) + 1)]
+        fallback_here: list[list[str]] = [[] for _ in range(len(PREFERRED_FIRA_BLOCK_NAMES) + 1)]
+        for block in vertical.get("blocks") or []:
+            if not isinstance(block, dict):
+                continue
+            text = str(block.get("text") or "").strip()
+            if not text:
+                continue
+            priority = _fira_block_priority(str(block.get("name") or ""))
+            fallback_here[priority].append(text)
+            if not _is_deprioritized_fira_vertical(vertical_name):
+                preferred_here[priority].append(text)
+        if not any(fallback_here):
+            continue
+        for index, texts in enumerate(fallback_here):
+            fallback_buckets[index].extend(texts)
+        for index, texts in enumerate(preferred_here):
+            prioritized_buckets[index].extend(texts)
+
+    for bucket in prioritized_buckets:
+        if bucket:
+            return "\n\n".join(bucket).strip()
+    for bucket in fallback_buckets:
+        if bucket:
+            return "\n\n".join(bucket).strip()
+    return ""
 
 
 def _load_markdown_manifest(source: Path) -> CourseManifest:
