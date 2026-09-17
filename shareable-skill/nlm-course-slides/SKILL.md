@@ -348,11 +348,9 @@ python3 scripts/summarize_course_slide_status.py \
 - In this local environment, once Stage E finishes and there are no remaining failed or still-running items, Codex should proceed directly to Stage F download without asking the user for an extra confirmation.
 - In this local environment, when Stage F downloads PPTX files to the local course directory, Codex should immediately post-process each downloaded deck before presenting it to the user.
 - In this local environment, when Stage F downloads a section deck, Codex must also write a Markdown transcript beside the final PPTX, using the same final filename stem and the `.md` extension.
-- In a shared/new-machine setup, Codex must confirm before Stage D whether the user wants a profile pool. If the user only has 1 Google account, do not enable the pool. If the user has multiple accounts, collect their `nlm` profile names first and pass them via repeated `--profile-pool-item`.
-- In this local environment, when the user confirms that a profile pool is available, Stage D slide creation should use the local profile pool by default when `--profile` is not explicitly forced:
-  - `worker_wly` -> `wlydsydmhmdsyd@gmail.com`
-  - `worker_daba` -> `dababyturnsintoaconvertible@gmail.com`
-- In this local environment, Stage C notebook creation and source upload must default to the owner account `default` -> `wuzhijian1999@gmail.com`, so the notebook owner is always the main account unless the user explicitly overrides it.
+- In a shared/new-machine setup, Codex must confirm before Stage D whether the user wants a profile pool. If the user only has 1 Google account, do not enable the pool and use only `default`. If the user has multiple accounts, collect their own `nlm` profile names first and pass them via repeated `--profile-pool-item`.
+- In this shareable skill, do not hardcode private worker profile names or personal email addresses. The safe default is a single `default` profile unless the user explicitly provides additional profiles.
+- In this local environment, Stage C notebook creation and source upload should default to `default` unless the user explicitly overrides it.
 - Before Stage C or Stage D in this local environment, Codex must show the planned NotebookLM prompt wording for confirmation. At minimum, confirm the target audience, source-document framing, and any course-family-specific wording before creating new slides.
 - In this local environment, Codex must not blindly reuse the previous course family's prompt wording. It must adapt the prompt to the current course family based on the fetched course title and the extracted teaching content before any new create requests.
 - When showing the planned NotebookLM prompt for confirmation in this local environment, Codex must include both:
@@ -378,11 +376,9 @@ python3 scripts/summarize_course_slide_status.py \
   - source framing should explicitly describe `管理变革流程智能化培训解决方案`, emphasizing `识别、立项、诊断、规划、试点验证、推广落地与运营转化`
   - generation requirements should emphasize `管理变革流程中的关键机制、方法、判断依据、治理动作与落地路径`
   - remove stale wording copied from other course families, especially any HR-specific terminology constraints that do not belong to the current course
-- In this local environment, when Stage C creates a new notebook under the owner account, it should also share that notebook with the default slide-worker collaborators as editors:
-  - `worker_wly` -> `wlydsydmhmdsyd@gmail.com`
-  - `worker_daba` -> `dababyturnsintoaconvertible@gmail.com`
-- In this local environment, Stage D slide creation may use the owner account's create quota. The default slide-create order is `default`, then `worker_wly`, then `worker_daba`.
-- The local estimate is `15` slide-deck creates per profile per day, so the pool estimate is `45` per day in total.
+- In this shareable skill, the default collaborator-sharing behavior is no sharing. Only add collaborators when the user explicitly provides the email addresses.
+- In this local environment, Stage D slide creation should use `default` unless the user explicitly provides additional profile-pool entries.
+- The local estimate is `15` slide-deck creates per configured profile per day. If the user provides a profile pool, compute the pooled estimate from the actual configured profiles rather than hidden defaults.
 - When a create request fails with a quota / daily-limit style error, Codex should mark that profile as exhausted for the current day and automatically retry the same section with the next profile in the pool.
 - The local per-profile usage tracker is only a success counter, not NotebookLM's official quota source of truth. A profile can still show large local remaining capacity while NotebookLM temporarily returns `RESOURCE_EXHAUSTED` for create requests.
 - In this local environment, distinguish `temporary service-side create throttling` from `local estimated remaining capacity`. When reporting capacity to the user, explicitly label it as a local estimate rather than a guaranteed NotebookLM remaining quota.
@@ -399,31 +395,18 @@ python3 scripts/summarize_course_slide_status.py \
 ## Local Reliability Notes
 
 - In this local environment, always clear `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY`, and the lowercase variants before any `nlm` or NotebookLM API call.
-- When the user adds a new slide worker in this local environment, update all of the following in the same turn so future chats inherit the change:
-  - `scripts/common.py` -> add the worker email to `DEFAULT_NOTEBOOK_SHARE_EMAILS`
-  - `scripts/common.py` -> add the profile-to-email mapping to `EXPECTED_PROFILE_EMAILS`
-  - `scripts/create_slides_from_sources.py` -> add the worker to `DEFAULT_CREATE_PROFILE_POOL` in the intended create order
-  - `SKILL.md` -> update the local profile pool list, default collaborator list, expected mapping notes, create order, and pooled daily-capacity estimate if the pool size changed
-- In this local environment, do not stop after only editing the skill text when adding a worker. The code defaults and the skill instructions must stay aligned.
-- When the user replaces one worker with another in this local environment, update the code defaults and skill text in the same turn, but also treat the new worker as operationally incomplete until all 3 checks pass:
-  - the new worker's dedicated NotebookLM auth browser has been used for login
-  - the saved `nlm` profile has been refreshed from that same profile-bound browser
-  - the new worker has been invited to the target notebook and has passed at least one real NotebookLM API or create-path validation relevant to the current task
+- If the user wants to use multiple Google accounts on their own machine, collect their own `nlm` profile names at runtime and pass them explicitly with `--profile-pool-item`. Do not hardcode private worker emails or private profile names into this shareable skill.
 - Do not trust `nlm login --check` as the source of truth on this machine; it may report `expired` even when real NotebookLM RPC calls still work.
 - Do not trust `check_auth(live=True)` as the only source of truth on this machine either; it can still report `expired` while the real NotebookLM API path is usable.
 - The preferred auth validation order in this local environment is:
-  - first, confirm the saved profile email matches the expected mapping
+  - first, if the user has explicitly configured an expected email mapping on their own machine, confirm the saved profile email matches that mapping
   - second, validate with a real NotebookLM API call such as `NotebookLMClient(...).list_notebooks()`
   - only use homepage-style auth checks as a secondary signal
 - Prefer refreshing credentials from each profile's own saved browser profile.
-- Never reuse an unmapped existing CDP browser across profiles; that can contaminate `default`, `worker_wly`, and `worker_daba`.
-- Expected local profile mapping:
-  - `default` -> `wuzhijian1999@gmail.com`
-  - `worker_wly` -> `wlydsydmhmdsyd@gmail.com`
-  - `worker_daba` -> `dababyturnsintoaconvertible@gmail.com`
+- Never reuse an unmapped existing CDP browser across profiles; that can contaminate saved credentials across `default` and any additional profiles the user configures.
 - If a profile refresh resolves to the wrong Google account, treat it as profile contamination and repair it before continuing.
 - When a user asks to "just open a login window" in this local environment, prefer the simplest path:
-  - for `default`, `worker_wly`, `worker_daba`, or any newly added worker, launch that profile's dedicated NotebookLM auth browser first
+  - for `default` or any explicitly configured additional profile, launch that profile's dedicated NotebookLM auth browser first
   - after the user says the login is done, extract cookies from that same profile-bound CDP browser and save them directly to the matching `nlm` profile
   - avoid repeated generic browser windows or repeated account switching in a shared normal Chrome session
 - When repairing NotebookLM slide names, avoid hardcoding Chinese titles or paths in PowerShell literals. Read the course JSON or manifest in UTF-8 inside Python and derive section titles there.
@@ -435,5 +418,4 @@ python3 scripts/summarize_course_slide_status.py \
 - For local progress checks, count actual output files in the course directory (`*_水印版.pptx`) instead of trusting stale reports alone.
 - In this local environment, NotebookLM may auto-generate English artifact titles even when the intended section title is Chinese. For recovery, rename, and download workflows, prefer the `文稿题目：...` line inside `custom_instructions` over the current artifact title.
 - During slide creation in this local environment, treat transient RPC disconnects such as `WinError 10053` as retryable network errors and retry the same profile before marking the section failed.
-- A newly added worker can show `share_status` as `editor` and can list notebook sources, yet still return `API error (code 3): INVALID_ARGUMENT` on slide creation. Do not treat visibility alone as proof that the worker is usable for slide generation; require one successful create on the target notebook before counting that worker as reliable capacity.
-- In this local environment, after replacing a failing worker with a new worker, prefer forcing the remaining failed sections through the new worker first before resuming mixed profile-pool retries. This makes the worker validation unambiguous and reduces confusion about which account actually cleared the backlog.
+- An additional profile can show `share_status` as `editor` and can list notebook sources, yet still return `API error (code 3): INVALID_ARGUMENT` on slide creation. Do not treat visibility alone as proof that the profile is usable for slide generation; require one successful create on the target notebook before counting that profile as reliable capacity.

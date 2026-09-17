@@ -108,17 +108,10 @@ NLM_RATE_LIMIT_MAX_DELAY_SECONDS = 240.0
 NLM_RATE_LIMIT_MAX_RETRIES = 4
 NLM_RATE_LIMIT_LOCK_PATH = Path(tempfile.gettempdir()) / "nlm-course-slides.rate-limit.lock"
 NLM_STATUS_RATE_LIMIT_LOCK_PATH = Path(tempfile.gettempdir()) / "nlm-course-slides.status-rate-limit.lock"
-DEFAULT_NOTEBOOK_SHARE_EMAIL = "wlydsydmhmdsyd@gmail.com"
-DEFAULT_NOTEBOOK_SHARE_EMAILS = [
-    "wlydsydmhmdsyd@gmail.com",
-    "dababyturnsintoaconvertible@gmail.com",
-]
+DEFAULT_NOTEBOOK_SHARE_EMAIL = ""
+DEFAULT_NOTEBOOK_SHARE_EMAILS: list[str] = []
 DEFAULT_NOTEBOOK_SHARE_ROLE = "editor"
-EXPECTED_PROFILE_EMAILS = {
-    "default": "wuzhijian1999@gmail.com",
-    "worker_wly": "wlydsydmhmdsyd@gmail.com",
-    "worker_daba": "dababyturnsintoaconvertible@gmail.com",
-}
+EXPECTED_PROFILE_EMAILS: dict[str, str] = {}
 
 
 def _lock_file(handle: Any) -> None:

@@ -28,12 +28,8 @@ from common import (
     write_json,
 )
 
-DEFAULT_CREATE_PROFILE_POOL = [
-    {"profile": "default", "email": "wuzhijian1999@gmail.com"},
-    {"profile": "worker_wly", "email": "wlydsydmhmdsyd@gmail.com"},
-    {"profile": "worker_daba", "email": "dababyturnsintoaconvertible@gmail.com"},
-]
 DEFAULT_SINGLE_PROFILE = {"profile": "default", "email": ""}
+DEFAULT_CREATE_PROFILE_POOL = [dict(DEFAULT_SINGLE_PROFILE)]
 DEFAULT_CREATE_DAILY_LIMIT = 15
 CREATE_USAGE_TRACKER_PATH = Path.home() / ".notebooklm-mcp-cli" / "slide-create-usage.json"
 CREATE_QUOTA_ERROR_MARKERS = [
