@@ -5,6 +5,8 @@
 shareable-skill/*
 !shareable-skill/nlm-course-slides/
 !shareable-skill/nlm-course-slides/**
+!shareable-skill/ppt-to-imagesgallery/
+!shareable-skill/ppt-to-imagesgallery/**
 
 shareable-skill/*.zip
 **/__pycache__/
